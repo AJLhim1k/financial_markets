@@ -153,6 +153,29 @@ class AnswerStat(Base):
         return f"<AnswerStat(name='{self.name}', correct={self.correct_cnt}, wrong={self.wrong_cnt})>"
 
 
+# Модель для хранения рейтинга
+class Rating(Base):
+    __tablename__ = 'ratings'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    group_id = Column(Integer, ForeignKey('groups.id'), nullable=True)  # null для общего рейтинга
+    rating_type = Column(String(20), nullable=False)  # 'group' или 'overall'
+    rank = Column(Integer, nullable=False)  # Позиция в рейтинге
+    grade = Column(Integer, nullable=False)  # Оценка (0-10, храним как int * 100 для точности)
+    score = Column(Integer, nullable=False)  # Баллы на момент расчета
+    excluded = Column(Integer, default=0)  # 0 или 1 (Boolean как Integer для SQLite)
+    cdf_value = Column(Integer, nullable=True)  # Квантиль (храним как int * 10000 для точности)
+    calculated_at = Column(DateTime, default=datetime.now, nullable=False)  # Когда рассчитан
+
+    # Связи
+    user = relationship("User", backref="ratings")
+    group = relationship("Group", backref="ratings")
+
+    def __repr__(self):
+        return f"<Rating(user_id={self.user_id}, type={self.rating_type}, rank={self.rank}, grade={self.grade/100:.2f})>"
+
+
 # Класс для управления базой данных
 class DatabaseManager:
     def __init__(self, db_url="sqlite:///users.db"):
@@ -259,8 +282,17 @@ class DatabaseManager:
             remaining = max_attempts - user.requests_today
             return remaining if remaining > 0 else 0
 
-    def update_score(self, user_id, delta, changed_by_id=None):
-        """Обновляет баллы пользователя с логированием"""
+    def update_score(self, user_id, delta, changed_by_id=None, recalculate_rating=True):
+        """
+        Обновляет баллы пользователя с логированием
+        
+        Args:
+            user_id: ID пользователя
+            delta: Изменение баллов
+            changed_by_id: ID пользователя, который изменил баллы
+            recalculate_rating: Пересчитывать ли рейтинг после изменения (по умолчанию True)
+        """
+        result = None
         with self.get_session() as session:
             user = session.get(User, user_id)
             if not user:
@@ -278,11 +310,23 @@ class DatabaseManager:
                 )
 
                 old_score, new_score = changer.change_user_score(user, delta, session)
-                return old_score, new_score
+                result = (old_score, new_score)
             else:
                 old_score = user.score
                 user.score += delta
-                return old_score, user.score
+                result = (old_score, user.score)
+        
+        # Пересчитываем рейтинг после коммита сессии (вне контекста)
+        if recalculate_rating and result:
+            try:
+                from rating import rating_system
+                rating_system.recalculate_all_ratings()
+            except Exception as e:
+                # Если не удалось пересчитать, не падаем
+                import sys
+                print(f"Warning: Failed to recalculate ratings: {e}", file=sys.stderr)
+        
+        return result
 
     def get_score(self, user_id):
         """Получает баллы пользователя"""
@@ -566,6 +610,127 @@ class DatabaseManager:
                     })
 
             return available_groups
+
+    # Методы для работы с рейтингом
+    def save_rating(self, user_id, group_id, rating_type, rank, grade, score, excluded, cdf_value=None):
+        """
+        Сохраняет или обновляет рейтинг пользователя в БД
+        
+        Args:
+            user_id: ID пользователя
+            group_id: ID группы (None для общего рейтинга)
+            rating_type: 'group' или 'overall'
+            rank: Позиция в рейтинге
+            grade: Оценка (0-10, передавать как float, будет сохранено как int * 100)
+            score: Баллы на момент расчета
+            excluded: Исключен ли (True/False)
+            cdf_value: Квантиль (передавать как float, будет сохранено как int * 10000)
+        """
+        with self.get_session() as session:
+            # Ищем существующий рейтинг
+            query = session.query(Rating).filter(
+                Rating.user_id == user_id,
+                Rating.rating_type == rating_type
+            )
+            if group_id:
+                query = query.filter(Rating.group_id == group_id)
+            else:
+                query = query.filter(Rating.group_id.is_(None))
+            
+            rating = query.first()
+            
+            # Конвертируем значения для хранения
+            grade_int = int(round(grade * 100))  # Сохраняем с точностью до 0.01
+            cdf_int = int(round(cdf_value * 10000)) if cdf_value is not None else None  # Точность до 0.0001
+            
+            if rating:
+                # Обновляем существующий
+                rating.rank = rank
+                rating.grade = grade_int
+                rating.score = score
+                rating.excluded = 1 if excluded else 0
+                rating.cdf_value = cdf_int
+                rating.calculated_at = datetime.now()
+            else:
+                # Создаем новый
+                rating = Rating(
+                    user_id=user_id,
+                    group_id=group_id,
+                    rating_type=rating_type,
+                    rank=rank,
+                    grade=grade_int,
+                    score=score,
+                    excluded=1 if excluded else 0,
+                    cdf_value=cdf_int
+                )
+                session.add(rating)
+
+    def get_ratings_from_db(self, group_id=None, rating_type='overall'):
+        """
+        Получает рейтинг из БД
+        
+        Args:
+            group_id: ID группы (None для общего рейтинга)
+            rating_type: 'group' или 'overall'
+            
+        Returns:
+            Список словарей с данными рейтинга
+        """
+        with self.get_session() as session:
+            query = session.query(Rating, User, Group).join(
+                User, Rating.user_id == User.id
+            ).outerjoin(
+                Group, Rating.group_id == Group.id
+            ).filter(
+                Rating.rating_type == rating_type
+            )
+            
+            if group_id:
+                query = query.filter(Rating.group_id == group_id)
+            elif rating_type == 'group':
+                # Для группового рейтинга group_id не должен быть None
+                query = query.filter(Rating.group_id.isnot(None))
+            else:
+                # Для общего рейтинга group_id должен быть None
+                query = query.filter(Rating.group_id.is_(None))
+            
+            results = query.order_by(Rating.rank).all()
+            
+            ratings = []
+            for rating, user, group in results:
+                ratings.append({
+                    'user_id': user.id,
+                    'username': user.username,
+                    'score': rating.score,
+                    'rank': rating.rank,
+                    'grade': rating.grade / 100.0,  # Конвертируем обратно
+                    'excluded': bool(rating.excluded),
+                    'cdf_value': rating.cdf_value / 10000.0 if rating.cdf_value else None,
+                    'group_id': rating.group_id,
+                    'group_name': group.name if group else 'Без группы',
+                    'calculated_at': rating.calculated_at
+                })
+            
+            return ratings
+
+    def clear_ratings(self, group_id=None, rating_type=None):
+        """
+        Очищает рейтинги из БД (для пересчета)
+        
+        Args:
+            group_id: ID группы (None для всех групп)
+            rating_type: 'group', 'overall' или None для всех
+        """
+        with self.get_session() as session:
+            query = session.query(Rating)
+            
+            if rating_type:
+                query = query.filter(Rating.rating_type == rating_type)
+            
+            if group_id is not None:
+                query = query.filter(Rating.group_id == group_id)
+            
+            query.delete()
 
 
 # Создаем глобальный экземпляр менеджера БД
