@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum as PyEnum
-from sqlalchemy import Column, Integer, String, Date, ForeignKey, DateTime, Enum
+from sqlalchemy import Column, Integer, String, Date, ForeignKey, DateTime, Enum, Float
 
 # Импортируем Base из base.py вместо создания здесь
 from .base import Base
@@ -20,6 +20,7 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     username = Column(String(100), nullable=False)
     score = Column(Integer, default=100)
+    seminar_grade = Column(Float, nullable=True)  # Оценка за семинары (0-10)
     requests_today = Column(Integer, default=0)
     last_request_date = Column(Date, nullable=True)
     user_type = Column(Enum(UserType), default=UserType.STUDENT, nullable=False)
