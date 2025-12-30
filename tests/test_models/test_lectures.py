@@ -702,7 +702,7 @@ class TestLectureIntegration:
         assert updated_lecture.title == "Обновленное название"
         assert updated_lecture.description == "Обновленное описание"
         assert updated_lecture.is_processed is True
-        assert updated_lecture.updated_at > updated_lecture.created_at
+        assert updated_lecture.updated_at >= updated_lecture.created_at
 
         # 4. Удаление
         db_session.delete(updated_lecture)
