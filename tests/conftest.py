@@ -1,3 +1,4 @@
+# tests/conftest.py
 """
 Фикстуры для тестирования системы управления пользователями
 """
@@ -6,12 +7,33 @@ from datetime import datetime, timedelta
 import uuid
 import sys
 import os
+from pathlib import Path
 
-# Добавляем корень проекта в путь для импортов
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+# НАЙДЕМ КОРЕНЬ ПРОЕКТА ПРАВИЛЬНО
+# Поднимаемся на 2 уровня вверх от этого файла
+current_file = Path(__file__).resolve()
+project_root = current_file.parent.parent  # tests -> проект
 
-from models.database_manager import db, UserType
-from models.database_manager import make_seminarist, make_admin, reset_to_student
+# Добавляем корень проекта в путь
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+print(f"📁 Project root: {project_root}")
+print(f"📁 Current dir: {os.getcwd()}")
+print(f"📁 Python path: {sys.path[:3]}")
+
+try:
+    from models.database_manager import db, UserType
+    from models.database_manager import make_seminarist, make_admin, reset_to_student
+    print("✅ Импорт models.database_manager успешен")
+except ImportError as e:
+    print(f"❌ Ошибка импорта: {e}")
+    print("📁 Содержимое models/:")
+    models_dir = project_root / "models"
+    if models_dir.exists():
+        for f in models_dir.iterdir():
+            print(f"  - {f.name}")
+    raise
 
 
 @pytest.fixture(scope="function", autouse=True)
