@@ -1,21 +1,41 @@
-# bot.py
+# bot.py - РАБОЧАЯ ВЕРСИЯ С ВСЕМИ ФУНКЦИЯМИ
 import os
 import asyncio
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from dotenv import load_dotenv
 from urllib.parse import urlencode
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Загрузка переменных окружения
 load_dotenv()
 
-# Инициализация бота
+
+# ==================== CORS MIDDLEWARE ====================
+@web.middleware
+async def cors_middleware(request, handler):
+    response = await handler(request)
+    response.headers.update({
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, *",
+        "Access-Control-Allow-Credentials": "true"
+    })
+
+    # Обработка preflight запросов
+    if request.method == "OPTIONS":
+        return response
+
+    return response
+
+
+# Создаём приложение с CORS
+app = web.Application(middlewares=[cors_middleware])
+
+# ==================== БОТ ====================
 bot = Bot(
     token=os.getenv("TELEGRAM_API_KEY"),
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
@@ -24,8 +44,6 @@ dp = Dispatcher()
 
 
 # ==================== TELEGRAM BOT HANDLERS ====================
-
-
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
     """Главное меню с веб-приложением"""
@@ -36,8 +54,11 @@ async def start_cmd(message: types.Message):
         try:
             from models.database_manager import db
             db.get_or_create_user(user.id, user.first_name or user.username)
-        except:
-            pass  # Игнорируем ошибки БД
+            print(f"✅ Пользователь {user.id} зарегистрирован в БД")
+        except ImportError as e:
+            print(f"⚠️ Модуль БД не найден: {e}")
+        except Exception as e:
+            print(f"⚠️ Ошибка БД: {e}")
 
         # URL для веб-приложения
         web_app_url = os.getenv("WEB_APP_URL", "https://localhost:8000")
@@ -50,23 +71,23 @@ async def start_cmd(message: types.Message):
         full_url = f"{web_app_url}/api/init_session?{query_params}"
 
         # Клавиатура с кнопкой веб-приложения
-        kb = types.ReplyKeyboardMarkup(
+        kb = ReplyKeyboardMarkup(
             keyboard=[
                 [
-                    types.KeyboardButton(
+                    KeyboardButton(
                         text="🌐 Открыть веб-приложение",
-                        web_app=types.WebAppInfo(url=full_url)
+                        web_app=WebAppInfo(url=full_url)
                     )
                 ],
                 [
-                    types.KeyboardButton(text="📊 Рейтинг"),
-                    types.KeyboardButton(text="👤 Профиль")
+                    KeyboardButton(text="📊 Рейтинг"),
+                    KeyboardButton(text="👤 Профиль")
                 ]
             ],
             resize_keyboard=True
         )
 
-        welcome_text = f"""🎓 Привет, {user.first_name}!
+        welcome_text = f"""🎓 Привет, {user.first_name or user.username}!
 
 Добро пожаловать в образовательную платформу!
 
@@ -84,6 +105,7 @@ async def start_cmd(message: types.Message):
     except Exception as e:
         print(f"❌ Ошибка в start_cmd: {e}")
         await message.answer("Привет! Используйте кнопки меню.")
+
 
 @dp.message(lambda message: message.text == "🌐 Открыть веб-приложение")
 async def open_web_app_button(message: types.Message):
@@ -129,10 +151,10 @@ async def open_web_app_button(message: types.Message):
 async def show_rating(message: types.Message):
     """Показать рейтинг"""
     try:
-        # Пробуем получить реальный рейтинг
+        user_id = message.from_user.id
+
         try:
             from models.database_manager import db
-            user_id = message.from_user.id
 
             # Получаем топ-5
             top_players = db.get_top_players(5)
@@ -144,18 +166,23 @@ async def show_rating(message: types.Message):
                     response += f"{medal} {player['username']} - {player['score']} баллов\n"
 
                 # Получаем позицию пользователя
-                user_position, user_score = db.get_user_position(user_id)
-                response += f"\n📊 Ваша позиция: {user_position}\n"
-                response += f"🎯 Ваши баллы: {user_score}"
+                try:
+                    user_position, user_score = db.get_user_position(user_id)
+                    response += f"\n📊 Ваша позиция: {user_position}\n"
+                    response += f"🎯 Ваши баллы: {user_score}"
+                except:
+                    response += "\n📊 Ваша позиция: информация недоступна"
+
                 await message.answer(response)
             else:
-                await message.answer("📊 Рейтинг пока пуст. Данные в разработке.")
+                await message.answer("📊 Рейтинг пока пуст. Будьте первым!")
 
         except ImportError:
-            await message.answer("📊 Модуль рейтинга в разработке. Откройте веб-приложение для просмотра.")
+            # Заглушка если БД не доступна
+            await message.answer("📊 Рейтинг временно недоступен. Откройте веб-приложение для просмотра.")
         except Exception as e:
             print(f"⚠️ Ошибка получения рейтинга: {e}")
-            await message.answer("📊 Рейтинг временно недоступен. Откройте веб-приложение.")
+            await message.answer("📊 Рейтинг временно недоступен. Попробуйте позже.")
 
     except Exception as e:
         print(f"❌ Ошибка показа рейтинга: {e}")
@@ -168,7 +195,6 @@ async def show_profile(message: types.Message):
     try:
         user = message.from_user
 
-        # Пробуем получить реальный профиль
         try:
             from models.database_manager import db
             from models import Group
@@ -184,22 +210,35 @@ async def show_profile(message: types.Message):
                             group_name = group.name
 
                 # Получаем позицию
-                user_position = db.get_user_position(user.id)[0]
+                try:
+                    user_position, user_score = db.get_user_position(user.id)
+                    position_text = f"📈 Ваша позиция в рейтинге: {user_position}"
+                    score_text = f"🎯 Ваши баллы: {user_score}"
+                except:
+                    position_text = "📈 Ваша позиция в рейтинге: информация недоступна"
+                    score_text = f"🎯 Ваши баллы: {db_user.score}"
 
                 response = f"""👤 Ваш профиль:
 
 📛 Имя: {db_user.username}
 👥 Текущая группа: {group_name}
-🏆 Баллы: {db_user.score}
 ⭐ Оценка за семинары: {db_user.seminar_grade or 'еще не рассчитана'}
 
-📈 Ваша позиция в рейтинге: {user_position}"""
+{score_text}
+{position_text}"""
                 await message.answer(response)
             else:
                 await message.answer("👤 Профиль не найден. Откройте веб-приложение для регистрации.")
 
         except ImportError:
-            await message.answer("👤 Модуль профиля в разработке. Откройте веб-приложение.")
+            # Информация из Telegram если БД недоступна
+            response = f"""👤 Ваш профиль (базовая информация):
+
+📛 Имя: {user.first_name or user.username}
+🆔 ID: {user.id}
+
+📊 Для полного профиля откройте веб-приложение."""
+            await message.answer(response)
         except Exception as e:
             print(f"⚠️ Ошибка получения профиля: {e}")
             await message.answer("👤 Профиль временно недоступен. Откройте веб-приложение.")
@@ -219,6 +258,7 @@ async def help_cmd(message: types.Message):
 <b>Основные команды:</b>
 /start - Главное меню
 /help - Эта справка
+/webapp - Быстрый доступ к веб-приложению
 
 <b>Основные кнопки:</b>
 🌐 <b>Открыть веб-приложение</b> - веб-приложение прямо в Telegram
@@ -235,7 +275,7 @@ async def help_cmd(message: types.Message):
 • Используйте мобильное приложение Telegram
 • Перейдите по ссылке: {web_app_url}
 
-<b>Поддержка:</b> support@education-platform.ru
+<b>Поддержка:</b> @ajlhimik
 """
     await message.answer(help_text, disable_web_page_preview=True)
 
@@ -249,8 +289,6 @@ async def webapp_cmd(message: types.Message):
         web_app_full_url = f"{web_app_url}/api/init_session?user_id={user.id}&username={user.first_name or user.username}&is_telegram=true"
 
         # Создаем инлайн-кнопку для веб-приложения
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(
@@ -277,114 +315,102 @@ async def api_health(request):
     return web.json_response({
         'status': 'ok',
         'service': 'education-platform',
-        'version': '2.0.0'
+        'version': '2.0.0',
+        'timestamp': asyncio.get_event_loop().time()
     })
 
 
 async def init_session(request):
     """Инициализация сессии из Telegram"""
-    user_id = request.query.get('user_id')
-    username = request.query.get('username')
+    try:
+        user_id = request.query.get('user_id')
+        username = request.query.get('username')
 
-    if user_id and username:
-        # Пробуем зарегистрировать пользователя
-        try:
-            from models.database_manager import db
-            db.get_or_create_user(int(user_id), username)
-        except:
-            pass  # Игнорируем ошибки БД
+        if user_id and username:
+            # Пробуем зарегистрировать пользователя
+            try:
+                from models.database_manager import db
+                db.get_or_create_user(int(user_id), username)
+                print(f"✅ Сессия инициализирована для {username} ({user_id})")
+            except ImportError:
+                print("⚠️ Модуль БД не найден при инициализации сессии")
+            except Exception as e:
+                print(f"⚠️ Ошибка БД при инициализации: {e}")
 
-    # Редирект на главную страницу
-    raise web.HTTPFound('/')
-
-
-# ==================== ROUTES SETUP ====================
-
-app = web.Application()
-
-# API endpoints
-app.router.add_get('/api/health', api_health)
-app.router.add_get('/api/init_session', init_session)
-
-# HTML страницы - статика
-app.router.add_static('/', path=os.path.join(BASE_DIR, 'html_dir'))
+        # Редирект на главную страницу
+        raise web.HTTPFound('/')
+    except Exception as e:
+        print(f"❌ Ошибка в init_session: {e}")
+        raise web.HTTPFound('/')
 
 
-# ==================== STARTUP ====================
-
-async def on_startup(app):
-    """Запуск при старте приложения"""
-    print("🔧 Инициализация бота и веб-сервера...")
-
-    print("🌐 Настройка веб-приложения...")
-    print(f"   WEB_APP_URL: {os.getenv('WEB_APP_URL', 'https://localhost:8000')}")
-    print("   Веб-приложение будет открываться прямо в Telegram")
-    print("   Убедитесь, что используете HTTPS для production!")
-
-    # Проверяем что есть html_dir с index.html
+async def index_handler(request):
+    """Главная страница - просто отдаём файл"""
     html_dir = os.path.join(BASE_DIR, 'html_dir')
     index_file = os.path.join(html_dir, 'index.html')
 
-    if not os.path.exists(html_dir):
-        os.makedirs(html_dir)
-        print(f"📁 Создана директория: {html_dir}")
+    if os.path.exists(index_file):
+        return web.FileResponse(index_file)
+    else:
+        # Если файла нет - ошибка 404
+        return web.Response(text='File index.html not found', status=404)
 
-    if not os.path.exists(index_file):
-        print(f"⚠️  Файл {index_file} не найден!")
-        print("   Создай html_dir/index.html или запусти create_html.py")
 
-    # Запуск polling для бота
+# ==================== ROUTES SETUP ====================
+app.router.add_get('/', index_handler)
+app.router.add_get('/api/health', api_health)
+app.router.add_get('/api/init_session', init_session)
+
+# Статические файлы
+html_dir = os.path.join(BASE_DIR, 'html_dir')
+if os.path.exists(html_dir):
+    app.router.add_static('/static', html_dir)
+    print(f"✅ Статика подключена из {html_dir}")
+
+
+# ==================== STARTUP ====================
+async def on_startup(app):
+    """Запуск при старте приложения"""
+    print("=" * 60)
+    print("🚀 ЗАПУСК ОБРАЗОВАТЕЛЬНОЙ ПЛАТФОРМЫ")
+    print("=" * 60)
+
     try:
+        # Проверяем наличие html_dir
+        html_dir_path = os.path.join(BASE_DIR, 'html_dir')
+        if not os.path.exists(html_dir_path):
+            os.makedirs(html_dir_path)
+            print(f"📁 Создана директория: {html_dir_path}")
+
+        index_file = os.path.join(html_dir_path, 'index.html')
+        if not os.path.exists(index_file):
+            print(f"⚠️  Внимание: index.html не найден в {html_dir_path}")
+            print("   Создайте файл index.html или запустите create_html.py")
+
+        # Запускаем бота
         await bot.delete_webhook(drop_pending_updates=True)
         asyncio.create_task(dp.start_polling(bot, skip_updates=True))
-        print("🤖 Бот запущен")
-    except Exception as e:
-        print(f"❌ Ошибка запуска бота: {e}")
+        print("✅ Telegram бот запущен")
 
-    print(f"🚀 Веб-сервер запущен на https://0.0.0.0:8000")
-    print("📱 Используйте /start в Telegram и нажмите кнопку для открытия веб-приложения")
+        web_app_url = os.getenv("WEB_APP_URL", "https://localhost:8000")
+        print(f"🌐 Веб-приложение доступно по адресу: {web_app_url}")
+
+    except Exception as e:
+        print(f"❌ Ошибка при запуске: {e}")
 
 
 app.on_startup.append(on_startup)
 
-# ==================== ВАЖНОЕ ПРИМЕЧАНИЕ ====================
-"""
-Для корректной работы веб-приложения в Telegram:
-
-1. В production должен быть HTTPS (Telegram требует безопасное соединение)
-2. Можно использовать:
-   - Облачные хостинги (Heroku, Render, Railway)
-   - VPS с настроенным SSL (nginx + Let's Encrypt)
-   - Cloudflare Tunnel
-   - Ngrok для тестирования (ngrok http 8000 --host-header="localhost:8000")
-
-3. Установите WEB_APP_URL в .env:
-   Для теста через ngrok: WEB_APP_URL=https://ваш-домен.ngrok.io
-   Для production: WEB_APP_URL=https://ваш-домен.com
-
-4. Telegram Web Apps работают только в:
-   - Мобильных приложениях Telegram (iOS/Android)
-   - Telegram Desktop (последние версии)
-   - НЕ работают в веб-версии Telegram
-"""
-
 
 # ==================== MAIN ====================
-
 async def main():
-    """Асинхронная функция запуска"""
-    # Проверка переменных окружения
+    """Главная функция запуска"""
     if not os.getenv("TELEGRAM_API_KEY"):
-        print("❌ TELEGRAM_API_KEY не установлен!")
-        print("💡 Создай .env файл с токеном бота")
+        print("❌ Ошибка: TELEGRAM_API_KEY не найден в .env файле!")
+        print("   Создайте .env файл с переменными окружения")
         return
 
-    print("=" * 50)
-    print("🎓 Образовательная платформа")
-    print("🤖 Telegram бот + Веб-приложение внутри Telegram")
-    print("=" * 50)
-
-    # Создаем и запускаем runner
+    # Запускаем веб-сервер
     runner = web.AppRunner(app)
     await runner.setup()
 
@@ -394,15 +420,16 @@ async def main():
     site = web.TCPSite(runner, host, port)
     await site.start()
 
-    print(f"🌐 Веб-сервер запущен на https://{host}:{port}")
-    print("📱 Теперь веб-приложение будет открываться прямо в Telegram!")
-    print("⚠️  Для production необходим HTTPS и правильный WEB_APP_URL в .env")
+    print(f"🌐 Веб-сервер запущен на http://{host}:{port}")
+    print("🤖 Telegram бот активен")
+    print("📱 Используйте /start в Telegram для открытия веб-приложения")
+    print("=" * 60)
 
-    # Ожидаем сигнала завершения
+    # Ожидаем завершения
     try:
         await asyncio.Event().wait()
     except KeyboardInterrupt:
-        print("\n👋 Завершение работы по запросу пользователя")
+        print("\n👋 Завершение работы")
     finally:
         await runner.cleanup()
 
@@ -411,7 +438,7 @@ if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n👋 Приложение завершено")
+        print("\n👋 Приложение завершено пользователем")
     except Exception as e:
         print(f"❌ Критическая ошибка: {e}")
         import traceback
