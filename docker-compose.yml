@@ -1,0 +1,34 @@
+# docker-compose.yml
+services:
+  education-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - NO_CACHE=${NO_CACHE:-false}
+    container_name: education-platform
+    ports:
+      - "8000:8000"
+    environment:
+      - TELEGRAM_API_KEY=${TELEGRAM_API_KEY}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - WEB_APP_URL=${WEB_APP_URL:-https://localhost:8000}
+      - DB_TYPE=${DB_TYPE:-sqlite}
+      - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/database.db}
+      - HOST=0.0.0.0
+      - PORT=8000
+      - UPLOAD_DIR=/app/uploads
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-2048}
+      - ADMIN_IDS=${ADMIN_IDS}
+    volumes:
+      - ./uploads:/app/uploads
+      - ./records:/app/records
+      - ./static:/app/static
+      - ./data:/app/data
+      - ./html_dir:/app/html_dir
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
