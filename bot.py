@@ -94,7 +94,6 @@ async def start_cmd(message: types.Message):
 📌 <b>Нажмите на кнопку ниже, чтобы открыть веб-приложение:</b>
 • 📚 Просмотр и загрузка лекций
 • 🎯 Прохождение семинаров
-• 👨‍🏫 Управление пользователями (для админов)
 
 💡 Веб-приложение откроется прямо в Telegram!
 """
@@ -338,10 +337,89 @@ async def init_session(request):
                 print(f"⚠️ Ошибка БД при инициализации: {e}")
 
         # Редирект на главную страницу
-        raise web.HTTPFound('/')
+        return web.HTTPFound('/')
+
     except Exception as e:
         print(f"❌ Ошибка в init_session: {e}")
-        raise web.HTTPFound('/')
+        return web.HTTPFound('/')
+
+
+async def api_rating(request):
+    """API для получения рейтинга"""
+    try:
+        rating_type = request.query.get('type', 'overall')
+
+        try:
+            from models.database_manager import db
+
+            if rating_type == 'overall':
+                # Общий рейтинг
+                rating = db.get_overall_rating()
+            else:
+                # Групповой рейтинг
+                group_id = request.query.get('group_id')
+                if group_id:
+                    rating = db.get_group_rating(int(group_id))
+                else:
+                    rating = []
+
+            return web.json_response({
+                'success': True,
+                'rating': rating,
+                'type': rating_type
+            })
+
+        except ImportError:
+            return web.json_response({
+                'success': False,
+                'error': 'Database module not available'
+            })
+        except Exception as e:
+            print(f"❌ Ошибка получения рейтинга: {e}")
+            return web.json_response({
+                'success': False,
+                'error': str(e)
+            })
+
+    except Exception as e:
+        print(f"❌ Ошибка в api_rating: {e}")
+        return web.json_response({
+            'success': False,
+            'error': 'Server error'
+        })
+
+
+async def api_check_admin(request):
+    """Проверка, является ли пользователь админом"""
+    try:
+        user_id = request.query.get('user_id')
+
+        if not user_id:
+            return web.json_response({'is_admin': False, 'error': 'No user_id provided'})
+
+        try:
+            from models.database_manager import db
+            db_user = db.get_user(int(user_id))
+
+            is_admin = False
+            if db_user and hasattr(db_user, 'user_type'):
+                is_admin = db_user.user_type.value == "admin"
+
+            return web.json_response({
+                'is_admin': is_admin,
+                'user_id': user_id,
+                'username': db_user.username if db_user else None
+            })
+
+        except ImportError:
+            return web.json_response({'is_admin': False, 'error': 'DB module not found'})
+        except Exception as e:
+            print(f"❌ Ошибка в api_check_admin: {e}")
+            return web.json_response({'is_admin': False, 'error': str(e)})
+
+    except Exception as e:
+        print(f"❌ Ошибка в api_check_admin: {e}")
+        return web.json_response({'is_admin': False, 'error': 'Server error'})
 
 
 async def index_handler(request):
@@ -356,10 +434,45 @@ async def index_handler(request):
         return web.Response(text='File index.html not found', status=404)
 
 
+async def api_debug_user(request):
+    """Отладка: проверка пользователя в БД"""
+    try:
+        user_id = request.query.get('user_id')
+        if not user_id:
+            return web.json_response({'error': 'No user_id'})
+
+        from models.database_manager import db
+
+        with db.get_session() as session:
+            from models.users import User, UserType
+            user = session.query(User).filter(User.id == int(user_id)).first()
+
+            if user:
+                return web.json_response({
+                    'user_id': user.id,
+                    'username': user.username,
+                    'user_type': user.user_type.value if user.user_type else None,
+                    'user_type_enum': str(user.user_type),
+                    'score': user.score,
+                    'group_id': user.group_id,
+                    'all_types': [t.value for t in UserType]
+                })
+            else:
+                return web.json_response({'error': 'User not found'})
+
+    except Exception as e:
+        return web.json_response({'error': str(e)})
+
+
+# Добавь этот роут в app.router:
+app.router.add_get('/api/debug_user', api_debug_user)
+
 # ==================== ROUTES SETUP ====================
 app.router.add_get('/', index_handler)
 app.router.add_get('/api/health', api_health)
 app.router.add_get('/api/init_session', init_session)
+app.router.add_get('/api/rating', api_rating)  # Новый endpoint
+app.router.add_get('/api/check_admin', api_check_admin)  # Новый endpoint
 
 # Статические файлы
 html_dir = os.path.join(BASE_DIR, 'html_dir')
