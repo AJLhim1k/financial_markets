@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Добавить лекцию - Админ-панель</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: white;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            margin-top: 20px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .logo {
+            font-size: 3rem;
+            margin-bottom: 15px;
+        }
+
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            color: #f1c40f;
+        }
+
+        .subtitle {
+            font-size: 1rem;
+            opacity: 0.9;
+            margin-bottom: 20px;
+        }
+
+        .back-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 10px;
+            text-decoration: none;
+            margin-bottom: 20px;
+            transition: all 0.3s;
+        }
+
+        .back-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .form-container {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 25px;
+            border-radius: 15px;
+            border: 1px solid rgba(52, 152, 219, 0.3);
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.95rem;
+            opacity: 0.9;
+            color: #3498db;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            padding: 12px 15px;
+            color: white;
+            font-size: 0.95rem;
+            transition: all 0.3s;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #3498db;
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        .file-upload {
+            border: 2px dashed rgba(52, 152, 219, 0.5);
+            padding: 25px;
+            text-align: center;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 10px;
+        }
+
+        .file-upload:hover {
+            border-color: #3498db;
+            background: rgba(52, 152, 219, 0.1);
+        }
+
+        .file-info {
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(52, 152, 219, 0.1);
+            border-radius: 8px;
+            display: none;
+        }
+
+        .btn {
+            padding: 12px 25px;
+            border-radius: 10px;
+            border: none;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: bold;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #2980b9;
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .btn-success {
+            background: #27ae60;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #219653;
+            transform: translateY(-2px);
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 25px;
+        }
+
+        .notification {
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .notification-success {
+            background: rgba(46, 204, 113, 0.2);
+            border: 1px solid rgba(46, 204, 113, 0.3);
+            color: #2ecc71;
+        }
+
+        .notification-error {
+            background: rgba(231, 76, 60, 0.2);
+            border: 1px solid rgba(231, 76, 60, 0.3);
+            color: #e74c3c;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            margin-left: 10px;
+        }
+
+        .status-active {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+
+        .status-draft {
+            background: rgba(241, 196, 15, 0.2);
+            color: #f1c40f;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 15px;
+            }
+
+            .form-actions {
+                flex-direction: column;
+            }
+
+            .btn {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">📚</div>
+            <h1>Добавить лекцию</h1>
+            <p class="subtitle">Заполните форму для добавления новой лекции в систему</p>
+        </header>
+
+        <a href="/" class="back-btn">
+            ← На главную
+        </a>
+
+        <div id="notification" class="notification" style="display: none;"></div>
+
+        <div class="form-container">
+            <form id="lecture-form">
+                <div class="form-group">
+                    <label for="lecture-title">Название лекции *</label>
+                    <input type="text" id="lecture-title" placeholder="Введите название лекции" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="lecture-number">Номер лекции *</label>
+                    <input type="number" id="lecture-number" placeholder="1" min="1" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="lecture-description">Описание лекции</label>
+                    <textarea id="lecture-description" placeholder="Опишите содержание лекции..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="lecture-status">Статус *</label>
+                    <select id="lecture-status" required>
+                        <option value="draft">Черновик</option>
+                        <option value="active" selected>Активна</option>
+                        <option value="archived">В архиве</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="lecture-video">Ссылка на видео (YouTube/Vimeo)</label>
+                    <input type="url" id="lecture-video" placeholder="https://youtube.com/watch?v=...">
+                </div>
+
+                <div class="form-group">
+                    <label for="lecture-slides">Ссылка на презентацию</label>
+                    <input type="url" id="lecture-slides" placeholder="https://docs.google.com/presentation/...">
+                </div>
+
+                <div class="form-group">
+                    <label>Файл лекции (PDF, PPT, DOC, TXT)</label>
+                    <div class="file-upload" id="file-upload-area">
+                        <input type="file" id="lecture-file" style="display: none;" accept=".pdf,.ppt,.pptx,.doc,.docx,.txt">
+                        <div style="font-size: 3rem; margin-bottom: 10px;">📎</div>
+                        <div>Перетащите файл сюда или кликните для выбора</div>
+                        <small style="opacity: 0.7; margin-top: 5px; display: block;">Максимальный размер: 50MB</small>
+                    </div>
+                    <div class="file-info" id="file-info">
+                        <div id="file-name"></div>
+                        <button type="button" onclick="clearFile()" style="margin-top: 5px; background: none; border: none; color: #e74c3c; cursor: pointer; font-size: 0.9rem;">
+                            Удалить файл
+                        </button>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-success">
+                        💾 Добавить лекцию
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="clearForm()">
+                        🗑️ Очистить форму
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <div style="margin-top: 30px; text-align: center; opacity: 0.7;">
+            <p>© Образовательная платформа • Доступно только администраторам</p>
+        </div>
+    </div>
+
+    <script>
+        // Глобальные переменные
+        let currentUserId = null;
+        let isAdminUser = false;
+        let uploadedFile = null;
+
+        // Инициализация
+        async function init() {
+            console.log('Страница добавления лекций');
+
+            // Получаем параметры из URL
+            const urlParams = new URLSearchParams(window.location.search);
+            currentUserId = urlParams.get('user_id');
+            const isAdminParam = urlParams.get('admin') === 'true';
+
+            if (!currentUserId) {
+                showNotification('❌ Ошибка: ID пользователя не указан', 'error');
+                return;
+            }
+
+            // Проверяем права администратора
+            await checkAdminAccess();
+
+            if (!isAdminUser) {
+                showNotification('🔒 Доступ запрещен. Только администраторы могут добавлять лекции.', 'error');
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 3000);
+                return;
+            }
+
+            // Настраиваем обработчики событий
+            setupEventListeners();
+
+            console.log('✅ Страница инициализирована для администратора:', currentUserId);
+        }
+
+        // Проверка прав администратора
+        async function checkAdminAccess() {
+            try {
+                const response = await fetch(`/api/check_admin?user_id=${currentUserId}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    isAdminUser = data.is_admin || false;
+
+                    if (!isAdminUser) {
+                        document.body.innerHTML = `
+                            <div class="container" style="text-align: center; padding: 50px;">
+                                <div style="font-size: 4rem; margin-bottom: 20px;">🔒</div>
+                                <h1 style="color: #e74c3c;">Доступ запрещен</h1>
+                                <p style="opacity: 0.8; margin: 20px 0;">Только администраторы могут добавлять лекции.</p>
+                                <a href="/" class="back-btn" style="margin-top: 20px;">← Вернуться на главную</a>
+                            </div>
+                        `;
+                    }
+                }
+            } catch (error) {
+                console.error('Ошибка проверки прав:', error);
+            }
+        }
+
+        // Настройка обработчиков событий
+        function setupEventListeners() {
+            // Обработка формы
+            document.getElementById('lecture-form').addEventListener('submit', handleSubmit);
+
+            // Загрузка файлов
+            setupFileUpload();
+        }
+
+        // Настройка загрузки файлов
+        function setupFileUpload() {
+            const fileInput = document.getElementById('lecture-file');
+            const uploadArea = document.getElementById('file-upload-area');
+            const fileInfo = document.getElementById('file-info');
+            const fileName = document.getElementById('file-name');
+
+            // Клик по области загрузки
+            uploadArea.addEventListener('click', () => fileInput.click());
+
+            // Drag & drop
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.style.borderColor = '#3498db';
+                uploadArea.style.background = 'rgba(52, 152, 219, 0.1)';
+            });
+
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.style.borderColor = 'rgba(52, 152, 219, 0.5)';
+                uploadArea.style.background = '';
+            });
+
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.style.borderColor = 'rgba(52, 152, 219, 0.5)';
+                uploadArea.style.background = '';
+
+                if (e.dataTransfer.files.length) {
+                    fileInput.files = e.dataTransfer.files;
+                    handleFileSelect();
+                }
+            });
+
+            // Изменение файла через input
+            fileInput.addEventListener('change', handleFileSelect);
+
+            function handleFileSelect() {
+                if (fileInput.files.length) {
+                    const file = fileInput.files[0];
+
+                    // Проверка размера файла (50MB)
+                    if (file.size > 50 * 1024 * 1024) {
+                        showNotification('❌ Файл слишком большой (максимум 50MB)', 'error');
+                        clearFile();
+                        return;
+                    }
+
+                    uploadedFile = file;
+                    fileName.textContent = `📄 ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+                    fileInfo.style.display = 'block';
+
+                    showNotification(`✅ Файл "${file.name}" загружен`, 'success');
+                }
+            }
+        }
+
+        // Обработка отправки формы
+        async function handleSubmit(e) {
+            e.preventDefault();
+
+            const title = document.getElementById('lecture-title').value.trim();
+            const lectureNumber = document.getElementById('lecture-number').value;
+            const description = document.getElementById('lecture-description').value.trim();
+            const status = document.getElementById('lecture-status').value;
+            const videoUrl = document.getElementById('lecture-video').value.trim();
+            const slidesUrl = document.getElementById('lecture-slides').value.trim();
+
+            // Валидация
+            if (!title) {
+                showNotification('❌ Введите название лекции', 'error');
+                return;
+            }
+
+            if (!lectureNumber) {
+                showNotification('❌ Введите номер лекции', 'error');
+                return;
+            }
+
+            // Подготовка данных для отправки
+            const formData = new FormData();
+            formData.append('user_id', currentUserId);
+            formData.append('title', title);
+            formData.append('lecture_number', lectureNumber);
+            formData.append('description', description);
+            formData.append('status', status);
+
+            if (videoUrl) formData.append('video_url', videoUrl);
+            if (slidesUrl) formData.append('slides_url', slidesUrl);
+            if (uploadedFile) formData.append('file', uploadedFile);
+
+            try {
+                // Отправка на сервер
+                const response = await fetch('/api/lectures/create', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    showNotification('✅ Лекция успешно добавлена!', 'success');
+
+                    // Очистка формы через 2 секунды
+                    setTimeout(() => {
+                        clearForm();
+                        showNotification('📝 Форма очищена. Можно добавить следующую лекцию.', 'success');
+                    }, 2000);
+                } else {
+                    const error = await response.json();
+                    showNotification(`❌ Ошибка: ${error.error || 'Неизвестная ошибка'}`, 'error');
+                }
+            } catch (error) {
+                console.error('Ошибка отправки формы:', error);
+                showNotification('⚠️ Ошибка подключения к серверу', 'error');
+            }
+        }
+
+        // Очистка формы
+        function clearForm() {
+            document.getElementById('lecture-title').value = '';
+            document.getElementById('lecture-number').value = '';
+            document.getElementById('lecture-description').value = '';
+            document.getElementById('lecture-status').value = 'active';
+            document.getElementById('lecture-video').value = '';
+            document.getElementById('lecture-slides').value = '';
+            clearFile();
+        }
+
+        // Очистка файла
+        function clearFile() {
+            const fileInput = document.getElementById('lecture-file');
+            fileInput.value = '';
+            uploadedFile = null;
+            document.getElementById('file-info').style.display = 'none';
+        }
+
+        // Показать уведомление
+        function showNotification(message, type = 'success') {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification notification-${type}`;
+            notification.style.display = 'block';
+
+            // Автоматически скрыть через 5 секунд
+            if (type === 'success') {
+                setTimeout(() => {
+                    notification.style.display = 'none';
+                }, 5000);
+            }
+        }
+
+        // Инициализация при загрузке страницы
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>

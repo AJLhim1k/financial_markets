@@ -290,7 +290,6 @@
                 <span class="btn-text">Семинары</span>
                 <span class="btn-status">В разработке</span>
             </button>
-
             <button class="main-btn rating" onclick="toggleRating()">
                 <span class="main-btn-icon">📊</span>
                 <span class="btn-text">Рейтинг</span>
@@ -320,8 +319,8 @@
                 <button class="admin-btn" onclick="openAdminRating()">
                     📊 Рейтинг
                 </button>
-                <button class="admin-btn" onclick="openAdminContent()">
-                    📚 Контент
+                <button class="admin-btn" onclick="window.location.href='/admin/lectures.html?user_id=' + currentUserId + '&admin=true'">
+                📚 Добавить лекцию
                 </button>
                 <button class="admin-btn" onclick="openAdminLogs()">
                     📋 Логи
@@ -573,6 +572,7 @@
         function openAdminContent() {
             alert('📚 Управление контентом\n\n• Загрузка лекций\n• Добавление вопросов\n• Редактирование материалов\n• Публикация контента');
         }
+
 
         function openAdminLogs() {
             alert('📋 Логи операций\n\n• Логи изменений баллов\n• Логи операций\n• Логи смены групп\n• Статистика активности');

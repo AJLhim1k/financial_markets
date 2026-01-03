@@ -1,6 +1,7 @@
-# bot.py - РАБОЧАЯ ВЕРСИЯ С ВСЕМИ ФУНКЦИЯМИ
+# bot.py - ФИНАЛЬНАЯ РАБОЧАЯ ВЕРСИЯ С ВСЕМИ ФУНКЦИЯМИ
 import os
 import asyncio
+import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
@@ -49,41 +50,55 @@ async def start_cmd(message: types.Message):
     """Главное меню с веб-приложением"""
     try:
         user = message.from_user
+        user_id = user.id
 
         # Пробуем получить или создать пользователя в БД
+        is_admin = False
         try:
             from models.database_manager import db
-            db.get_or_create_user(user.id, user.first_name or user.username)
-            print(f"✅ Пользователь {user.id} зарегистрирован в БД")
+            db_user = db.get_or_create_user(user_id, user.first_name or user.username)
+            print(f"✅ Пользователь {user_id} зарегистрирован в БД")
+
+            # Проверяем, является ли пользователь админом
+            is_admin = db_user.user_type.value == "admin" if db_user else False
         except ImportError as e:
             print(f"⚠️ Модуль БД не найден: {e}")
         except Exception as e:
             print(f"⚠️ Ошибка БД: {e}")
 
         # URL для веб-приложения
-        web_app_url = os.getenv("WEB_APP_URL", "https://localhost:8000")
+        web_app_url = os.getenv("WEB_APP_URL", "https://moexbot.uk")
 
         # Формируем параметры для сессии
         query_params = urlencode({
-            "user_id": user.id,
-            "username": user.first_name or user.username
+            "user_id": user_id,
+            "username": user.first_name or user.username,
+            "is_admin": "true" if is_admin else "false"
         })
-        full_url = f"{web_app_url}/api/init_session?{query_params}"
+        full_url = f"{web_app_url}/?{query_params}"
 
         # Клавиатура с кнопкой веб-приложения
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [
-                    KeyboardButton(
-                        text="🌐 Открыть веб-приложение",
-                        web_app=WebAppInfo(url=full_url)
-                    )
-                ],
-                [
-                    KeyboardButton(text="📊 Рейтинг"),
-                    KeyboardButton(text="👤 Профиль")
-                ]
+        keyboard_buttons = [
+            [
+                KeyboardButton(
+                    text="🌐 Открыть веб-приложение",
+                    web_app=WebAppInfo(url=full_url)
+                )
             ],
+            [
+                KeyboardButton(text="📊 Рейтинг"),
+                KeyboardButton(text="👤 Профиль")
+            ]
+        ]
+
+        # Добавляем кнопку админ-панели только для админов
+        if is_admin:
+            keyboard_buttons.append([
+                KeyboardButton(text="👑 Админ-панель")
+            ])
+
+        kb = ReplyKeyboardMarkup(
+            keyboard=keyboard_buttons,
             resize_keyboard=True
         )
 
@@ -94,16 +109,72 @@ async def start_cmd(message: types.Message):
 📌 <b>Нажмите на кнопку ниже, чтобы открыть веб-приложение:</b>
 • 📚 Просмотр и загрузка лекций
 • 🎯 Прохождение семинаров
+• 📊 Рейтинг и статистика
+
+{'👑 <b>Вы имеете права администратора!</b>' if is_admin else ''}
 
 💡 Веб-приложение откроется прямо в Telegram!
 """
 
         await message.answer(welcome_text, reply_markup=kb)
-        print(f"✅ /start отправлен пользователю {user.id}")
+        print(f"✅ /start отправлен пользователю {user_id}, админ: {is_admin}")
 
     except Exception as e:
         print(f"❌ Ошибка в start_cmd: {e}")
         await message.answer("Привет! Используйте кнопки меню.")
+
+
+@dp.message(lambda message: message.text == "👑 Админ-панель")
+async def admin_panel_button(message: types.Message):
+    """Открытие админ-панели"""
+    try:
+        user = message.from_user
+        user_id = user.id
+
+        # Проверяем права админа
+        try:
+            from models.database_manager import db
+            db_user = db.get_user(user_id)
+            is_admin = db_user and db_user.user_type.value == "admin" if db_user else False
+
+            if not is_admin:
+                await message.answer("❌ У вас нет прав для доступа к админ-панели!")
+                return
+
+        except ImportError as e:
+            print(f"⚠️ Модуль БД не найден: {e}")
+            await message.answer("❌ Ошибка проверки прав доступа!")
+            return
+        except Exception as e:
+            print(f"⚠️ Ошибка проверки прав админа: {e}")
+            await message.answer("❌ Ошибка проверки прав доступа!")
+            return
+
+        # URL для админ-панели
+        web_app_url = os.getenv("WEB_APP_URL", "https://moexbot.uk")
+        admin_url = f"{web_app_url}/?user_id={user_id}&username={user.first_name or user.username}&admin=true"
+
+        # Создаем инлайн-кнопку для админ-панели
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="👑 Открыть админ-панель",
+                        web_app=WebAppInfo(url=admin_url)
+                    )
+                ]
+            ]
+        )
+
+        await message.answer(
+            "👑 <b>Админ-панель управления</b>\n\n"
+            "Нажмите кнопку ниже, чтобы открыть панель администратора:",
+            reply_markup=kb
+        )
+
+    except Exception as e:
+        print(f"❌ Ошибка в admin_panel_button: {e}")
+        await message.answer("Ошибка при открытии админ-панели.")
 
 
 @dp.message(lambda message: message.text == "🌐 Открыть веб-приложение")
@@ -111,25 +182,16 @@ async def open_web_app_button(message: types.Message):
     """Обработка нажатия на кнопку веб-приложения (fallback)"""
     try:
         user = message.from_user
-        web_app_url = os.getenv("WEB_APP_URL", "https://localhost:8000")
-        web_app_full_url = f"{web_app_url}/api/init_session?user_id={user.id}&username={user.first_name or user.username}&is_telegram=true"
+        web_app_url = os.getenv("WEB_APP_URL", "https://moexbot.uk")
+        web_app_full_url = f"{web_app_url}/?user_id={user.id}&username={user.first_name or user.username}&is_telegram=true"
 
-        # Если кнопка не работает, показываем инструкцию
-        help_text = f"""🌐 <b>Как открыть веб-приложение:</b>
+        help_text = f"""🌐 <b>Открытие веб-приложения</b>
 
-1. Нажмите на кнопку <b>"🌐 Открыть веб-приложение"</b> в меню
-2. Веб-приложение откроется прямо в Telegram
-
-📱 <b>Если кнопка не работает:</b>
-• Обновите Telegram до последней версии
-• Используйте Telegram на телефоне (веб-приложения лучше работают в мобильной версии)
-• Или перейдите по ссылке: {web_app_full_url}
-
-💡 <b>Важно:</b> В браузере функция входа через Telegram будет недоступна."""
+Нажмите на кнопку ниже, чтобы открыть веб-приложение:"""
 
         await message.answer(help_text, disable_web_page_preview=True)
 
-        # Также отправляем кнопку отдельно для удобства
+        # Отправляем кнопку
         kb = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(
@@ -139,7 +201,7 @@ async def open_web_app_button(message: types.Message):
             ],
             resize_keyboard=True
         )
-        await message.answer("Попробуйте нажать здесь:", reply_markup=kb)
+        await message.answer("Нажмите здесь:", reply_markup=kb)
 
     except Exception as e:
         print(f"❌ Ошибка открытия веб-приложения: {e}")
@@ -250,7 +312,7 @@ async def show_profile(message: types.Message):
 @dp.message(Command("help"))
 async def help_cmd(message: types.Message):
     """Справка"""
-    web_app_url = os.getenv("WEB_APP_URL", "https://localhost:8000")
+    web_app_url = os.getenv("WEB_APP_URL", "https://moexbot.uk")
 
     help_text = f"""📚 <b>Помощь по боту:</b>
 
@@ -263,6 +325,7 @@ async def help_cmd(message: types.Message):
 🌐 <b>Открыть веб-приложение</b> - веб-приложение прямо в Telegram
 📊 Рейтинг - таблица лидеров
 👤 Профиль - ваша статистика
+👑 Админ-панель - панель управления (для администраторов)
 
 <b>Как пользоваться веб-приложением:</b>
 1. Нажмите "🌐 Открыть веб-приложение" в меню
@@ -284,8 +347,8 @@ async def webapp_cmd(message: types.Message):
     """Быстрый доступ к веб-приложению"""
     try:
         user = message.from_user
-        web_app_url = os.getenv("WEB_APP_URL", "https://localhost:8000")
-        web_app_full_url = f"{web_app_url}/api/init_session?user_id={user.id}&username={user.first_name or user.username}&is_telegram=true"
+        web_app_url = os.getenv("WEB_APP_URL", "https://moexbot.uk")
+        web_app_full_url = f"{web_app_url}/?user_id={user.id}&username={user.first_name or user.username}&is_telegram=true"
 
         # Создаем инлайн-кнопку для веб-приложения
         kb = InlineKeyboardMarkup(
@@ -336,8 +399,11 @@ async def init_session(request):
             except Exception as e:
                 print(f"⚠️ Ошибка БД при инициализации: {e}")
 
-        # Редирект на главную страницу
-        return web.HTTPFound('/')
+        # Редирект на главную страницу с параметрами
+        redirect_url = '/'
+        if user_id:
+            redirect_url = f'/?user_id={user_id}&username={username}'
+        return web.HTTPFound(redirect_url)
 
     except Exception as e:
         print(f"❌ Ошибка в init_session: {e}")
@@ -433,7 +499,6 @@ async def index_handler(request):
         # Если файла нет - ошибка 404
         return web.Response(text='File index.html not found', status=404)
 
-
 async def api_debug_user(request):
     """Отладка: проверка пользователя в БД"""
     try:
@@ -452,7 +517,7 @@ async def api_debug_user(request):
                     'user_id': user.id,
                     'username': user.username,
                     'user_type': user.user_type.value if user.user_type else None,
-                    'user_type_enum': str(user.user_type),
+                    'user_type_raw': str(user.user_type),
                     'score': user.score,
                     'group_id': user.group_id,
                     'all_types': [t.value for t in UserType]
@@ -464,8 +529,58 @@ async def api_debug_user(request):
         return web.json_response({'error': str(e)})
 
 
-# Добавь этот роут в app.router:
+async def api_admin_stats(request):
+    """API для получения статистики платформы (только для админов)"""
+    try:
+        user_id = request.query.get('user_id')
+
+        if not user_id:
+            return web.json_response({'error': 'No user_id'})
+
+        # Проверяем права админа
+        try:
+            from models.database_manager import db
+            db_user = db.get_user(int(user_id))
+            is_admin = db_user and db_user.user_type.value == "admin" if db_user else False
+
+            if not is_admin:
+                return web.json_response({'error': 'Access denied'}, status=403)
+
+        except Exception as e:
+            return web.json_response({'error': str(e)}, status=500)
+
+        # Получаем статистику
+        try:
+            with db.get_session() as session:
+                from models.users import User, UserType
+                from models.groups import Group
+                from models.questions import Question
+
+                total_users = session.query(User).count()
+                total_students = session.query(User).filter(User.user_type == UserType.STUDENT).count()
+                total_groups = session.query(Group).count()
+                total_questions = session.query(Question).filter(Question.is_active == True).count()
+
+                return web.json_response({
+                    'total_users': total_users,
+                    'total_students': total_students,
+                    'total_groups': total_groups,
+                    'total_questions': total_questions,
+                    'active_seminars': 20,  # Фиксированное значение
+                    'timestamp': asyncio.get_event_loop().time()
+                })
+
+        except Exception as e:
+            return web.json_response({'error': str(e)}, status=500)
+
+    except Exception as e:
+        print(f"❌ Ошибка в api_admin_stats: {e}")
+        return web.json_response({'error': 'Server error'}, status=500)
+
+
+# Добавляем роуты
 app.router.add_get('/api/debug_user', api_debug_user)
+app.router.add_get('/api/admin/stats', api_admin_stats)
 
 # ==================== ROUTES SETUP ====================
 app.router.add_get('/', index_handler)
@@ -500,16 +615,80 @@ async def on_startup(app):
             print(f"⚠️  Внимание: index.html не найден в {html_dir_path}")
             print("   Создайте файл index.html или запустите create_html.py")
 
+        # Инициализация админов из .env
+        print("\n🔧 Инициализация админов...")
+        admin_ids_str = os.getenv("ADMIN_IDS", "")
+
+        if admin_ids_str:
+            admin_ids = []
+            for id_str in admin_ids_str.split(","):
+                id_str = id_str.strip()
+                if id_str:
+                    try:
+                        admin_ids.append(int(id_str))
+                    except ValueError:
+                        print(f"   ⚠️ Неверный ID в ADMIN_IDS: '{id_str}'")
+
+            print(f"📋 ID админов из .env: {admin_ids}")
+
+            if admin_ids:
+                try:
+                    from models.database_manager import db
+                    from models.users import User, UserType
+
+                    updated_count = 0
+                    with db.get_session() as session:
+                        # Создаем фейковых пользователей-админов если их нет
+                        for admin_id in admin_ids:
+                            try:
+                                user = session.get(User, admin_id)
+                                if user:
+                                    # Если пользователь существует - обновляем до админа
+                                    if user.user_type != UserType.ADMIN:
+                                        user.user_type = UserType.ADMIN
+                                        updated_count += 1
+                                        print(f"   ✅ Пользователь {admin_id} назначен админом")
+                                    else:
+                                        print(f"   ℹ️  Пользователь {admin_id} уже админ")
+                                else:
+                                    # Создаем фейкового пользователя-админа
+                                    fake_user = User(
+                                        id=admin_id,
+                                        username=f"admin_{admin_id}",
+                                        user_type=UserType.ADMIN,
+                                        score=0,
+                                        requests_today=0,
+                                        last_request_date=None
+                                    )
+                                    session.add(fake_user)
+                                    print(f"   📝 Создан предзагруженный админ {admin_id}")
+                                    updated_count += 1
+                            except Exception as e:
+                                print(f"   ❌ Ошибка обработки админа {admin_id}: {e}")
+
+                        session.commit()
+
+                    print(f"   📊 Итого: {updated_count} админов инициализировано")
+
+                except ImportError as e:
+                    print(f"⚠️ Ошибка импорта модулей БД: {e}")
+                except Exception as e:
+                    print(f"⚠️ Общая ошибка инициализации админов: {e}")
+        else:
+            print("⚠️ ADMIN_IDS не указаны в .env файле")
+
         # Запускаем бота
         await bot.delete_webhook(drop_pending_updates=True)
         asyncio.create_task(dp.start_polling(bot, skip_updates=True))
         print("✅ Telegram бот запущен")
 
-        web_app_url = os.getenv("WEB_APP_URL", "https://localhost:8000")
+        web_app_url = os.getenv("WEB_APP_URL", "https://moexbot.uk")
         print(f"🌐 Веб-приложение доступно по адресу: {web_app_url}")
 
     except Exception as e:
         print(f"❌ Ошибка при запуске: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 app.on_startup.append(on_startup)
@@ -533,7 +712,8 @@ async def main():
     site = web.TCPSite(runner, host, port)
     await site.start()
 
-    print(f"🌐 Веб-сервер запущен на http://{host}:{port}")
+    print(f"\n🌐 Веб-сервер запущен на http://{host}:{port}")
+    print(f"🌐 Внешний URL: {os.getenv('WEB_APP_URL', 'https://moexbot.uk')}")
     print("🤖 Telegram бот активен")
     print("📱 Используйте /start в Telegram для открытия веб-приложения")
     print("=" * 60)
