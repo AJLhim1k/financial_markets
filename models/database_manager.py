@@ -118,6 +118,17 @@ class DatabaseManager:
                     user.user_type = user_type
                 return user
             else:
+                # 👇 ДОБАВЬ ЭТОТ КОД 👇
+                # Проверяем, является ли пользователь админом из .env
+                import os
+                admin_ids_str = os.getenv("ADMIN_IDS", "")
+                if admin_ids_str:
+                    admin_ids = [int(id.strip()) for id in admin_ids_str.split(",") if id.strip()]
+                    if user_id in admin_ids:
+                        user_type = UserType.ADMIN
+                        print(f"✅ Пользователь {user_id} создан как АДМИН (из ADMIN_IDS)")
+                # 👆 КОНЕЦ ДОБАВЛЕННОГО КОДА 👆
+
                 user = User(
                     id=user_id,
                     username=username,
@@ -126,7 +137,6 @@ class DatabaseManager:
                 )
                 session.add(user)
                 return user
-
     def register_user_request(self, user_id):
         """Регистрирует запрос пользователя"""
         today = datetime.now().date()
@@ -138,6 +148,22 @@ class DatabaseManager:
                     user.last_request_date = today
                 else:
                     user.requests_today += 1
+
+    def update_existing_admins(self):
+        """Обновляет существующих пользователей из ADMIN_IDS в админы"""
+        import os
+        admin_ids_str = os.getenv("ADMIN_IDS", "")
+        if not admin_ids_str:
+            return
+
+        admin_ids = [int(id.strip()) for id in admin_ids_str.split(",") if id.strip()]
+
+        with self.get_session() as session:
+            for admin_id in admin_ids:
+                user = session.get(User, admin_id)
+                if user and user.user_type != UserType.ADMIN:
+                    print(f"🔄 Обновление пользователя {admin_id} до админа")
+                    user.user_type = UserType.ADMIN
 
     def can_user_request(self, user_id, max_attempts=100):
         """Проверяет, может ли пользователь сделать запрос"""

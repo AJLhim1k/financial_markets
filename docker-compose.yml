@@ -1,6 +1,8 @@
 # docker-compose.yml
+version: '3.8'
+
 services:
-  education-app:
+  education-platform:  # 👈 ИЗМЕНИ ТУТ НА education-platform
     build:
       context: .
       dockerfile: Dockerfile
@@ -26,6 +28,7 @@ services:
       - ./static:/app/static
       - ./data:/app/data
       - ./html_dir:/app/html_dir
+      - ./models:/app/models  # 👈 ДОБАВЬ ЭТО! Важно!
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
