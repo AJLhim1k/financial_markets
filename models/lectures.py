@@ -1,12 +1,11 @@
 import os
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Text, BigInteger, Boolean
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import validates
+from sqlalchemy import Column, Integer, String, DateTime, Text, BigInteger, Boolean, ForeignKey
+from sqlalchemy.orm import validates, relationship
 import mimetypes
 
 # Импортируем Base из вашей существующей структуры
-from .base import Base  # или from .database_manager import Base
+from .base import Base  # Импортируем из base.py
 
 
 class Lecture(Base):
@@ -24,8 +23,10 @@ class Lecture(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Файл видео
-    file_name = Column(String(300), nullable=False)  # Имя файла: "introduction.mp4"
-    file_path = Column(String(500), nullable=False)  # Полный путь: "/uploads/lectures/introduction.mp4"
+    # Внешние ссылки на видео (вместо файлов)
+    external_video_url = Column(String(500), nullable=True)  # Ссылка на YouTube/Vimeo/Яндекс.Диск
+    external_slides_url = Column(String(500), nullable=True)  # Ссылка на презентацию/материалы
+    youtube_video_id = Column(String(100), nullable=True, index=True)  # ID YouTube видео (если есть)
     file_size = Column(BigInteger, nullable=True)  # Размер в байтах (важно для стриминга!)
     file_type = Column(String(50), default="video/mp4")  # MIME-тип
 
@@ -45,14 +46,18 @@ class Lecture(Base):
     slug = Column(String(200), unique=True, index=True, nullable=True)
     category = Column(String(100), nullable=True, index=True)
 
-    @validates('file_path')
-    def validate_file_path(self, key, file_path):
-        """Проверяем, что файл имеет допустимое расширение"""
-        allowed_extensions = {'.mp4', '.webm', '.mov', '.avi', '.mkv'}
-        _, ext = os.path.splitext(file_path)
-        if ext.lower() not in allowed_extensions:
-            raise ValueError(f"Недопустимое расширение файла. Разрешены: {allowed_extensions}")
-        return file_path
+    # Связь с просмотрами
+    views = relationship("LectureView", back_populates="lecture", cascade="all, delete-orphan")
+
+    @property
+    def video_url(self):
+        """Возвращает URL для воспроизведения видео"""
+        if self.youtube_video_id:
+            return f"https://www.youtube.com/embed/{self.youtube_video_id}"
+        elif self.external_video_url:
+            return self.external_video_url
+        else:
+            return None
 
     @property
     def file_exists(self):
@@ -70,11 +75,12 @@ class Lecture(Base):
         if not self.file_size:
             return "Неизвестно"
 
+        size = float(self.file_size)
         for unit in ['B', 'KB', 'MB', 'GB']:
-            if self.file_size < 1024.0:
-                return f"{self.file_size:.1f} {unit}"
-            self.file_size /= 1024.0
-        return f"{self.file_size:.1f} TB"
+            if size < 1024.0:
+                return f"{size:.1f} {unit}"
+            size /= 1024.0
+        return f"{size:.1f} TB"
 
     @property
     def video_info(self):
@@ -94,19 +100,19 @@ class Lecture(Base):
             "lecture_date": self.lecture_date.isoformat() if self.lecture_date else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "description": self.description,
-            "file_name": self.file_name,
-            "file_size": self.human_file_size,
-            "file_type": self.file_type,
             "duration": self.duration,
+            "video_url": self.video_url,  # <-- ВАЖНО: добавляем здесь!
+            "external_slides_url": self.external_slides_url,  # <-- и здесь!
             "thumbnail_url": f"/api/lectures/{self.id}/thumbnail" if self.thumbnail_path else None,
             "is_processed": self.is_processed,
             "is_public": self.is_public,
-            "file_exists": self.file_exists
+            "views_count": len(self.views) if self.views else 0
         }
 
-        if include_video_url:
-            result["video_url"] = f"/api/lectures/{self.id}/stream"
-            result["video_download_url"] = f"/api/lectures/{self.id}/download"
+        # Убери старые поля:
+        # "file_name": self.file_name,
+        # "file_size": self.human_file_size,
+        # "file_type": self.file_type,
 
         return result
 
@@ -130,10 +136,13 @@ class LectureView(Base):
     __tablename__ = 'lecture_views'
 
     id = Column(Integer, primary_key=True)
-    lecture_id = Column(Integer, index=True, nullable=False)
+    lecture_id = Column(Integer, ForeignKey('lectures.id', ondelete='CASCADE'), index=True, nullable=False)
     user_id = Column(Integer, index=True, nullable=True)  # если есть пользователи
     ip_address = Column(String(45), nullable=True)
     user_agent = Column(Text, nullable=True)
     watched_at = Column(DateTime, default=datetime.utcnow)
     watch_duration = Column(Integer, default=0)  # сколько секунд посмотрел
     completed = Column(Boolean, default=False)  # досмотрел ли до конца
+
+    # Связь с лекцией
+    lecture = relationship("Lecture", back_populates="views")

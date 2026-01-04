@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from .users import Base, User, UserType, AnswerStat
 from .logs import ScoreChangeLog, OperationLog
 from .groups import Group
+from .lectures import Lecture, LectureView  # Импортируем модели лекций
 from sqlalchemy.orm import relationship, configure_mappers
 
 
@@ -14,6 +15,7 @@ from sqlalchemy.orm import relationship, configure_mappers
 class DatabaseManager:
     def __init__(self, db_url="sqlite:///users.db"):
         self.engine = create_engine(db_url)
+        # Создаем все таблицы, включая новые модели лекций
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine, expire_on_commit=False)
 
@@ -37,6 +39,145 @@ class DatabaseManager:
     def init_db(self):
         """Инициализирует базу данных (создает таблицы)"""
         Base.metadata.create_all(self.engine)
+
+    # Методы для работы с лекциями
+
+    def create_lecture(self, title, author, lecture_date,
+                      external_video_url=None, external_slides_url=None, youtube_video_id=None,
+                      description=None, duration=None, width=None, height=None, bitrate=None,
+                      thumbnail_path=None, is_public=True, slug=None, category=None):
+        """Создает новую лекцию с внешними ссылками"""
+        with self.get_session() as session:
+            lecture = Lecture(
+                title=title,
+                author=author,
+                lecture_date=lecture_date,
+                external_video_url=external_video_url,
+                external_slides_url=external_slides_url,
+                youtube_video_id=youtube_video_id,
+                description=description,
+                duration=duration,
+                width=width,
+                height=height,
+                bitrate=bitrate,
+                thumbnail_path=thumbnail_path,
+                is_public=is_public,
+                slug=slug,
+                category=category
+            )
+            session.add(lecture)
+            return lecture
+
+    def get_lecture(self, lecture_id):
+        """Получает лекцию по ID"""
+        with self.get_session() as session:
+            return session.get(Lecture, lecture_id)
+
+    def get_all_lectures(self, public_only=True):
+        """Получает все лекции"""
+        with self.get_session() as session:
+            query = session.query(Lecture)
+            if public_only:
+                query = query.filter(Lecture.is_public == True)
+            return query.order_by(Lecture.lecture_date.desc()).all()
+
+    def update_lecture(self, lecture_id, **kwargs):
+        """Обновляет лекцию"""
+        with self.get_session() as session:
+            lecture = session.get(Lecture, lecture_id)
+            if not lecture:
+                return None
+
+            for key, value in kwargs.items():
+                if hasattr(lecture, key):
+                    setattr(lecture, key, value)
+
+            return lecture
+
+    def delete_lecture(self, lecture_id):
+        """Удаляет лекцию"""
+        with self.get_session() as session:
+            lecture = session.get(Lecture, lecture_id)
+            if lecture:
+                session.delete(lecture)
+                return True
+            return False
+
+    def search_lectures(self, query, public_only=True):
+        """Ищет лекции по названию, автору или описанию"""
+        with self.get_session() as session:
+            search_query = f"%{query}%"
+            q = session.query(Lecture).filter(
+                (Lecture.title.ilike(search_query)) |
+                (Lecture.author.ilike(search_query)) |
+                (Lecture.description.ilike(search_query))
+            )
+
+            if public_only:
+                q = q.filter(Lecture.is_public == True)
+
+            return q.order_by(Lecture.lecture_date.desc()).all()
+
+    # Методы для работы с просмотрами лекций
+    def add_lecture_view(self, lecture_id, user_id=None, ip_address=None,
+                         user_agent=None, watch_duration=0, completed=False):
+        """Добавляет запись о просмотре лекции"""
+        with self.get_session() as session:
+            view = LectureView(
+                lecture_id=lecture_id,
+                user_id=user_id,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                watch_duration=watch_duration,
+                completed=completed
+            )
+            session.add(view)
+            return view
+
+    def get_lecture_views(self, lecture_id, limit=100):
+        """Получает статистику просмотров для лекции"""
+        with self.get_session() as session:
+            views = session.query(LectureView) \
+                .filter(LectureView.lecture_id == lecture_id) \
+                .order_by(LectureView.watched_at.desc()) \
+                .limit(limit) \
+                .all()
+
+            return [{
+                'id': view.id,
+                'user_id': view.user_id,
+                'ip_address': view.ip_address,
+                'watched_at': view.watched_at,
+                'watch_duration': view.watch_duration,
+                'completed': view.completed
+            } for view in views]
+
+    def get_lecture_stats(self, lecture_id):
+        """Получает статистику по лекции"""
+        with self.get_session() as session:
+            views = session.query(LectureView) \
+                .filter(LectureView.lecture_id == lecture_id) \
+                .all()
+
+            if not views:
+                return {
+                    'total_views': 0,
+                    'unique_users': 0,
+                    'avg_watch_duration': 0,
+                    'completion_rate': 0
+                }
+
+            total_views = len(views)
+            unique_users = len(set(v.user_id for v in views if v.user_id))
+            avg_watch_duration = sum(v.watch_duration for v in views) / total_views if total_views > 0 else 0
+            completion_rate = (sum(1 for v in views if v.completed) / total_views * 100) if total_views > 0 else 0
+
+            return {
+                'total_views': total_views,
+                'unique_users': unique_users,
+                'avg_watch_duration': avg_watch_duration,
+                'completion_rate': completion_rate
+            }
 
     # Методы для работы с логами (перенесены из logs.py)
     def log_operation(self, user_id, operation_type):
@@ -118,7 +259,6 @@ class DatabaseManager:
                     user.user_type = user_type
                 return user
             else:
-                # 👇 ДОБАВЬ ЭТОТ КОД 👇
                 # Проверяем, является ли пользователь админом из .env
                 import os
                 admin_ids_str = os.getenv("ADMIN_IDS", "")
@@ -127,7 +267,6 @@ class DatabaseManager:
                     if user_id in admin_ids:
                         user_type = UserType.ADMIN
                         print(f"✅ Пользователь {user_id} создан как АДМИН (из ADMIN_IDS)")
-                # 👆 КОНЕЦ ДОБАВЛЕННОГО КОДА 👆
 
                 user = User(
                     id=user_id,
@@ -137,6 +276,7 @@ class DatabaseManager:
                 )
                 session.add(user)
                 return user
+
     def register_user_request(self, user_id):
         """Регистрирует запрос пользователя"""
         today = datetime.now().date()
@@ -453,11 +593,11 @@ class DatabaseManager:
             return available_groups
 
     # Методы для работы с рейтингом
-    def save_rating(self, user_id, group_id=None, rating_type='group', rank=None, 
+    def save_rating(self, user_id, group_id=None, rating_type='group', rank=None,
                     grade=None, score=None, excluded=False, cdf_value=None):
         """
         Сохраняет оценку за семинары для пользователя
-        
+
         Args:
             user_id: ID пользователя
             group_id: ID группы (None для общего рейтинга)
@@ -478,33 +618,33 @@ class DatabaseManager:
     def get_ratings_from_db(self, group_id=None, rating_type='group'):
         """
         Получает рейтинг из БД (читает из колонки seminar_grade пользователей)
-        
+
         Args:
             group_id: ID группы (None для общего рейтинга)
             rating_type: Тип рейтинга ('group' или 'overall')
-            
+
         Returns:
             Список словарей с информацией о рейтинге или None, если рейтинг не рассчитан
         """
         with self.get_session() as session:
             # Проверяем, есть ли хотя бы один студент с рассчитанным рейтингом
             query = session.query(User).filter(User.user_type == UserType.STUDENT)
-            
+
             if group_id:
                 query = query.filter(User.group_id == group_id)
-            
+
             # Проверяем, есть ли хотя бы один студент с рассчитанным рейтингом
             has_rating = query.filter(User.seminar_grade.isnot(None)).first()
-            
+
             if not has_rating:
                 return None
-            
+
             # Получаем всех студентов
             students = query.all()
-            
+
             if not students:
                 return None
-            
+
             # Формируем рейтинг
             rating = []
             EXCLUSION_THRESHOLD = -15  # Порог исключения из расчета
@@ -520,30 +660,30 @@ class DatabaseManager:
                         'group_name': student.group.name if student.group else 'Без группы'
                     }
                     rating.append(rating_entry)
-            
+
             # Сортируем по убыванию оценки, затем по убыванию баллов
             rating.sort(key=lambda x: (x['grade'], x['score']), reverse=True)
-            
+
             # Добавляем ранги
             for rank, entry in enumerate(rating, start=1):
                 entry['rank'] = rank
-            
+
             return rating if rating else None
 
     def clear_ratings(self, group_id=None, rating_type='group'):
         """
         Очищает рейтинги (устанавливает seminar_grade в None)
-        
+
         Args:
             group_id: ID группы (None для всех групп)
             rating_type: Тип рейтинга ('group' или 'overall')
         """
         with self.get_session() as session:
             query = session.query(User).filter(User.user_type == UserType.STUDENT)
-            
+
             if group_id:
                 query = query.filter(User.group_id == group_id)
-            
+
             students = query.all()
             for student in students:
                 student.seminar_grade = None
@@ -551,7 +691,7 @@ class DatabaseManager:
     def update_user_seminar_grade(self, user_id, grade):
         """
         Обновляет оценку за семинары для конкретного пользователя
-        
+
         Args:
             user_id: ID пользователя
             grade: Оценка за семинары (0-10)
@@ -567,22 +707,22 @@ class DatabaseManager:
         µ и σ рассчитываются по всем студентам с баллами > -15.
         """
         from .rating import calculate_grades
-        
+
         with self.get_session() as session:
             # Получаем всех студентов
             all_students = session.query(User).filter(
                 User.user_type == UserType.STUDENT
             ).all()
-            
+
             if not all_students:
                 return
-            
+
             # Подготавливаем данные для расчета оценок
             students_data = [(student.id, student.score) for student in all_students]
-            
+
             # Рассчитываем оценки
             grades_dict = calculate_grades(students_data)
-            
+
             # Сохраняем оценки в БД
             for user_id, grade_info in grades_dict.items():
                 user = session.get(User, user_id)
@@ -594,10 +734,10 @@ class DatabaseManager:
         """
         Получает рейтинг студентов в группе из БД или рассчитывает если его нет.
         Оценки рассчитываются на основе всех студентов (µ и σ по всем студентам).
-        
+
         Args:
             group_id: ID группы
-            
+
         Returns:
             Список словарей с информацией о студентах и их рейтинге
         """
@@ -605,7 +745,7 @@ class DatabaseManager:
         cached_rating = self.get_ratings_from_db(group_id=group_id, rating_type='group')
         if cached_rating:
             return cached_rating
-        
+
         # Если в БД нет, нужно сначала рассчитать оценки для всех студентов
         # Проверяем, есть ли уже рассчитанные оценки
         with self.get_session() as session:
@@ -614,11 +754,11 @@ class DatabaseManager:
                 User.user_type == UserType.STUDENT,
                 User.seminar_grade.isnot(None)
             ).first()
-            
+
             if not has_rating:
                 # Рассчитываем оценки для всех студентов
                 self.calculate_all_ratings()
-        
+
         # Теперь получаем студентов группы с их оценками
         with self.get_session() as session:
             group = session.get(Group, group_id)
@@ -662,7 +802,7 @@ class DatabaseManager:
         """
         Получает общий рейтинг всех студентов по всем группам из БД или рассчитывает если его нет.
         Оценки рассчитываются на основе всех студентов (µ и σ по всем студентам).
-        
+
         Returns:
             Список словарей с информацией о студентах и их рейтинге
         """
@@ -670,10 +810,10 @@ class DatabaseManager:
         cached_rating = self.get_ratings_from_db(group_id=None, rating_type='overall')
         if cached_rating:
             return cached_rating
-        
+
         # Если в БД нет, рассчитываем и сохраняем
         self.calculate_all_ratings()
-        
+
         # Теперь получаем всех студентов с их оценками
         with self.get_session() as session:
             # Получаем всех студентов
@@ -719,7 +859,7 @@ class DatabaseManager:
         """
         # Очищаем старые рейтинги
         self.clear_ratings()
-        
+
         # Рассчитываем и сохраняем оценки для всех студентов
         self.calculate_all_ratings()
 
@@ -727,7 +867,7 @@ class DatabaseManager:
         """
         Пересчитывает рейтинг для конкретной группы.
         Поскольку µ и σ рассчитываются по всем студентам, нужно пересчитать все оценки.
-        
+
         Args:
             group_id: ID группы
         """
@@ -737,11 +877,11 @@ class DatabaseManager:
     def get_user_rating_position(self, user_id: int, by_group: bool = False) -> Optional[Dict]:
         """
         Получает позицию пользователя в рейтинге
-        
+
         Args:
             user_id: ID пользователя
             by_group: Если True, возвращает позицию в группе, иначе в общем рейтинге
-            
+
         Returns:
             Словарь с информацией о позиции пользователя или None
         """
@@ -766,11 +906,11 @@ class DatabaseManager:
     def get_top_students_by_group(self, group_id: int, limit: int = 10) -> List[Dict]:
         """
         Получает топ студентов в группе
-        
+
         Args:
             group_id: ID группы
             limit: Количество студентов в топе
-            
+
         Returns:
             Список словарей с информацией о топ студентах
         """
@@ -780,10 +920,10 @@ class DatabaseManager:
     def get_top_students_overall(self, limit: int = 10) -> List[Dict]:
         """
         Получает топ студентов по всем группам
-        
+
         Args:
             limit: Количество студентов в топе
-            
+
         Returns:
             Список словарей с информацией о топ студентах
         """
@@ -793,15 +933,15 @@ class DatabaseManager:
     def get_rating_statistics(self, group_id: Optional[int] = None) -> Dict:
         """
         Получает статистику по рейтингу
-        
+
         Args:
             group_id: ID группы (если None, то статистика по всем группам)
-            
+
         Returns:
             Словарь со статистикой
         """
         import numpy as np
-        
+
         if group_id:
             rating = self.get_group_rating(group_id)
             group_name = rating[0]['group_name'] if rating else None
@@ -970,6 +1110,7 @@ def setup_relationships():
     from .users import User
     from .logs import ScoreChangeLog, OperationLog
     from .groups import Group
+    from .lectures import LectureView
 
     # Настраиваем связи User
     User.score_changes_made = relationship(
@@ -1049,10 +1190,47 @@ def calculate_all_seminar_grades():
     """
     Рассчитывает оценки за семинары для всех студентов.
     Вызывается после завершения всех семинаров.
-    
+
     Использует нормальное распределение:
     - Студенты с баллами <= -15 получают оценку 0
     - Для остальных: Norm.dist(x; µ; σ; true) * 10
     где µ и σ рассчитываются по всем студентам с баллами > -15
     """
     db.recalculate_all_ratings()
+
+
+# Функции для работы с лекциями (для обратной совместимости)
+def create_lecture(*args, **kwargs):
+    return db.create_lecture(*args, **kwargs)
+
+
+def get_lecture(lecture_id):
+    return db.get_lecture(lecture_id)
+
+
+def get_all_lectures(public_only=True):
+    return db.get_all_lectures(public_only)
+
+
+def update_lecture(lecture_id, **kwargs):
+    return db.update_lecture(lecture_id, **kwargs)
+
+
+def delete_lecture(lecture_id):
+    return db.delete_lecture(lecture_id)
+
+
+def add_lecture_view(*args, **kwargs):
+    return db.add_lecture_view(*args, **kwargs)
+
+
+def get_lecture_views(lecture_id, limit=100):
+    return db.get_lecture_views(lecture_id, limit)
+
+
+def get_lecture_stats(lecture_id):
+    return db.get_lecture_stats(lecture_id)
+
+
+def search_lectures(query, public_only=True):
+    return db.search_lectures(query, public_only)
